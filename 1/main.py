@@ -4,7 +4,7 @@ import re
 import time
 import argparse
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urljoin, unquote
 from collections import deque
 
 HEADERS = {
@@ -13,7 +13,32 @@ HEADERS = {
 
 
 def normalize_url(url):
-    return url.split("#")[0].strip()
+    try:
+        url = url.strip()
+        if not url:
+            return None
+
+        if not (url.startswith("http")):
+            return None
+
+        if "#" in url:
+            url = url.split("#")[0]
+
+        if "?" in url:
+            url = url.split("?")[0]
+
+        if url.endswith("/"):
+            url = url[:-1]
+
+        decoded_url = unquote(url)
+
+        if re.search(r"[а-яА-ЯёЁ]", decoded_url):
+            return None
+
+        return url.lower()
+
+    except:
+        return None
 
 
 def download(url):
@@ -59,7 +84,7 @@ def get_links(html, base):
     for a in soup.find_all("a", href=True):
         link = urljoin(base, a["href"])
         link = normalize_url(link)
-        if link.startswith("http"):
+        if link is not None and link.startswith("http"):
             result.add(link)
     return result
 
@@ -71,15 +96,22 @@ def is_valid_link(url):
 
 def crawl(start_urls, max_pages, min_words, output_dir):
     visited = set()
-    queue = deque(start_urls)
+    queued = set()
+    queue = deque()
     saved = []
 
     os.makedirs(output_dir, exist_ok=True)
     doc_id = 0
 
+    for url in start_urls:
+        normalized = normalize_url(url)
+        if normalized and normalized not in queued:
+            queue.append(normalized)
+            queued.add(normalized)
+
     while queue and len(saved) < max_pages:
-        url = normalize_url(queue.popleft())
-        if url in visited:
+        url = queue.popleft()
+        if not url or url in visited:
             continue
         visited.add(url)
 
@@ -112,8 +144,9 @@ def crawl(start_urls, max_pages, min_words, output_dir):
             print(f"skipped ({wc} total words)")
 
         for link in get_links(html, url):
-            if link not in visited and is_valid_link(link):
+            if link not in visited and link not in queued and is_valid_link(link):
                 queue.append(link)
+                queued.add(link)
 
         time.sleep(0.5)
 
